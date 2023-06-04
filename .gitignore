@@ -4,3 +4,7 @@
 # binaries
 obj/*
 bin/*
+
+# edittor
+.vscode/*
+!.vscode/settings.json
