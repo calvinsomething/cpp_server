@@ -2,7 +2,9 @@
 .env
 
 # binaries
-obj/*
+*.o
+*.obj
+*.exe
 bin/*
 
 # edittor
