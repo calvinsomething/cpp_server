@@ -7,7 +7,7 @@ bin/server: $(objects) $(deps)
 obj/main.o: src/main.cpp
 	g++ -c src/main.cpp -o obj/main.o -I vendor
 
-obj/server.o: src/server.cpp
+obj/server.o: src/server.cpp src/atomic_queue.h
 	g++ -c src/server.cpp -o obj/server.o -I vendor
 
 vendor/picohttpparser/picohttpparser.o: vendor/picohttpparser/picohttpparser.h vendor/picohttpparser/picohttpparser.c

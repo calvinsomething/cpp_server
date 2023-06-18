@@ -5,7 +5,7 @@
 
 #include "server.h"
 
-const int PORT = 8080, REQUEST_QUEUE_SIZE = 10, REQUEST_BUFFER_LEN = 30000;
+const int PORT = 8080, REQUEST_QUEUE_SIZE = 10;
 
 static Server server;
 
@@ -25,7 +25,7 @@ int main()
         new(&server) Server;
         std::cout << "Server created..." << std::endl;
 
-        server.start(PORT, REQUEST_QUEUE_SIZE, REQUEST_BUFFER_LEN);
+        server.start(PORT, REQUEST_QUEUE_SIZE);
     } catch (std::exception err) {
         std::cout << err.what() << std::endl;
     } catch (...) {

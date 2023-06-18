@@ -17,18 +17,37 @@ extern "C" {
     #include <picohttpparser/picohttpparser.h>
 }
 
-std::string fmtSocketError(const char* action, int error_code)
+// helpers
+
+std::runtime_error socket_setup_error(const char* action, int error_code)
 {
     std::stringstream ss;
     ss << "Failed to " << action << " server socket. [error code: " << error_code << "]";
-    return ss.str();
+    return std::runtime_error(ss.str());
 }
+
+void shutdown_socket(int socket_fd)
+{
+    if (shutdown(socket_fd, SHUT_RDWR)) {
+        int err = errno;
+        switch (err) {
+        case EBADF:
+            std::cout << "'" << socket_fd << "' is not a valid file descriptor." << std::endl;
+        case ENOTSOCK:
+            std::cout << "fd[" << socket_fd << "] is not a socket." << std::endl;
+        case ENOTCONN:
+            std::cout << "Socket (fd[" << socket_fd << "]) is not connected." << std::endl;
+        }
+    }
+}
+
+// Server implementation
 
 Server::Server(): connection_queue(10)
 {
     if ((socket_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
     {
-        throw std::runtime_error(fmtSocketError("create", socket_fd));
+        throw socket_setup_error("create", socket_fd);
     }
 }
 
@@ -37,7 +56,7 @@ Server::~Server()
     close(socket_fd);
 }
 
-void Server::start(unsigned port, unsigned queue_size, unsigned buffer_len)
+void Server::start(unsigned port, unsigned queue_size)
 {
     // Prepare listening socket
     sockaddr_in address = {};
@@ -49,12 +68,12 @@ void Server::start(unsigned port, unsigned queue_size, unsigned buffer_len)
     int result;
     if ((result = bind(socket_fd, reinterpret_cast<sockaddr*>(&address), sizeof(address))) < 0)
     {
-        throw std::runtime_error(fmtSocketError("bind", result));
+        throw socket_setup_error("bind", result);
     }
 
     if ((result = listen(socket_fd, queue_size)) < 0)
     {
-        throw std::runtime_error(fmtSocketError("listen on", result));
+        throw socket_setup_error("listen on", result);
     }
 
     std::cout << "Server listening on port " << port << "..." << std::endl;
@@ -64,21 +83,18 @@ void Server::start(unsigned port, unsigned queue_size, unsigned buffer_len)
     socklen_t connection_size = sizeof(connection_address);
 
     int connection;
-    const_cast<size_t&>(buffer_size) = buffer_len * sizeof(char);
 
     std::thread thread([this]() {
-            std::cout << "Thread started..." << std::endl;
             // should use setsockopt() to make connection socket reusable/still-alive
-            this->get_next_request(); // this is blocking --> need way to abort if server is stopped
-            // should handle RAII when done with connection socket
-            // request should be handed off to mux
+            // then store open connections somewhere to be shutdown/closed when server is stopped
+            this->get_next_request();
     });
 
-    while ((connection = accept(socket_fd, &connection_address, &connection_size)) >= 0)
+    while ((connection = accept(socket_fd, nullptr, nullptr)) >= 0)
     {
+        // if connection_address / address_size are needed, will need to pass a struct to the connection queue
         connection_queue.push(connection);
     }
-
     thread.join();
 
     std::cout << "Error on incoming connection ... [errno: " << errno << "]" << std::endl;
@@ -86,59 +102,60 @@ void Server::start(unsigned port, unsigned queue_size, unsigned buffer_len)
 
 void Server::stop()
 {
-    if (shutdown(socket_fd, 0)) {
-        int err = errno;
-        switch (err) {
-        case EBADF:
-            std::cout << "Socket is not a valid file descriptor." << std::endl;
-        case ENOTSOCK:
-            std::cout << "Socket is not a socket." << std::endl;
-        case ENOTCONN:
-            std::cout << "Socket is not connected." << std::endl;
+    connection_queue.stop();
+    shutdown_socket(socket_fd);
+}
+
+// should pass parsed request as struct to mux
+char* Server::get_next_request()
+{
+    int connection;
+    if (!connection_queue.pop(&connection)) {
+        return nullptr;
+    }
+
+    char* buffer = new char[4096];
+    const int buffer_size = 4096 * sizeof(char);
+
+    const char *method, *path;
+    int bytes_parsed, minor_version;
+    struct phr_header headers[100];
+    size_t method_len, path_len, num_headers;
+    
+    unsigned long buffer_index = 0;
+
+    while (1) {
+        long bytes_read;
+        while ((bytes_read = read(connection, buffer + buffer_index, buffer_size - buffer_index)) == -1 && errno == EINTR);
+        if (bytes_read <= 0)
+        {
+            throw std::runtime_error("IOERROR");
+        }
+
+        auto prev_index = buffer_index;
+        buffer_index += bytes_read;
+
+        num_headers = sizeof(headers) / sizeof(headers[0]);
+
+        bytes_parsed = phr_parse_request(buffer, buffer_index, &method, &method_len, &path, &path_len, &minor_version, headers, &num_headers, prev_index);
+        
+        if (bytes_parsed > 0)
+        {
+            break;
+        }
+        else if (bytes_parsed == -1)
+        {
+            throw std::runtime_error("ParseError");
+        }
+        assert(bytes_parsed == -2);
+
+        if (buffer_index == sizeof(buffer))
+        {
+            throw std::runtime_error("Request is too long.");
         }
     }
 
-    // have to close all connection sockets also...
-}
-
-char* Server::get_next_request()
-{
-    // blocks here waiting for connections to be put on queue -- need way to cancel if server is stopped
-    int connection = connection_queue.pop();
-
-    char* buffer = new char[buffer_size];
-    // read(connection, buffer, buffer_size);
-
-    char buf[4096];
-    const char *method, *path;
-    int pret, minor_version;
-    struct phr_header headers[100];
-    size_t buflen = 0, prevbuflen = 0, method_len, path_len, num_headers;
-    ssize_t rret;
-
-    while (1) {
-        /* read the request */
-        while ((rret = read(connection, buf + buflen, sizeof(buf) - buflen)) == -1 && errno == EINTR)
-            ;
-        if (rret <= 0)
-            throw std::runtime_error("IOERROR");
-        prevbuflen = buflen;
-        buflen += rret;
-        /* parse the request */
-        num_headers = sizeof(headers) / sizeof(headers[0]);
-        pret = phr_parse_request(buf, buflen, &method, &method_len, &path, &path_len,
-                                &minor_version, headers, &num_headers, prevbuflen);
-        if (pret > 0)
-            break; /* successfully parsed the request */
-        else if (pret == -1)
-            throw std::runtime_error("ParseError");
-        /* request is incomplete, continue the loop */
-        assert(pret == -2);
-        if (buflen == sizeof(buf))
-            throw std::runtime_error("RequestIsTooLongError");
-    }
-
-    printf("request is %d bytes long\n", pret);
+    printf("request is %d bytes long\n", bytes_parsed);
     printf("method is %.*s\n", (int)method_len, method);
     printf("path is %.*s\n", (int)path_len, path);
     printf("HTTP version is 1.%d\n", minor_version);
@@ -148,7 +165,7 @@ char* Server::get_next_request()
             (int)headers[i].value_len, headers[i].value);
     }
 
-    std::cout << buf << std::endl;
+    std::cout << buffer << std::endl;
 
     const char* msg = "It's working.";
 

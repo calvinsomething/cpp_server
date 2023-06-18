@@ -11,31 +11,39 @@ class AtomicQueue {
     std::mutex mtx;
     std::condition_variable pop_condition;
     std::condition_variable push_condition;
+
+    bool stopped;
 public:
-    AtomicQueue(unsigned len): i(), len(len) {
+    AtomicQueue(unsigned len): i(), len(len), stopped(false) {
         if (len > hard_size_limit) len = hard_size_limit;
         queue = static_cast<T*>(alloca(len * sizeof(T)));
     }
     
     void push(T val) {
         std::unique_lock lock(mtx);
-        if (i == len) {
+        while (i == len) {
             push_condition.wait(lock);
+            if (stopped) return;
         }
-
         queue[i++] = val;
         pop_condition.notify_one();
         return;
     }
 
-    T pop() {
+    bool pop(T* output) {
         std::unique_lock lock(mtx);
         while (!i) {
             pop_condition.wait(lock);
+            if (stopped) return false;
         }
-
-        T val = queue[--i];
+        *output = queue[--i];
         push_condition.notify_one();
-        return val;
+        return true;
+    }
+
+    void stop() {
+        stopped = true;
+        pop_condition.notify_all();
+        push_condition.notify_all();
     }
 };
