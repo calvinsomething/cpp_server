@@ -1,12 +1,13 @@
 #pragma once
 
+#include <condition_variable>
 #include <mutex>
 
 template <typename T, uint hard_size_limit>
 class AtomicQueue {
     // Both queue and i are critical data
     T* queue;
-    size_t i, len;
+    size_t i, len; // TODO: ADD A SEPERATE INDEX FOR PUSHING AND POPPING SO IT'S A QUEUE, NOT A STACK!
 
     std::mutex mtx;
     std::condition_variable pop_condition;

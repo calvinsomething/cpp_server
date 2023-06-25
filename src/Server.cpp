@@ -1,21 +1,15 @@
-#include "server.h"
+#include "Server.h"
 
 #include <cassert>
 #include <exception>
 #include <iostream>
-#include <mutex>
 #include <sstream>
-#include <thread>
 
 #include <sys/socket.h>
 #include <string.h>
 #include <netinet/in.h>
 #include <errno.h>
 #include <unistd.h>
-
-extern "C" {
-    #include <picohttpparser/picohttpparser.h>
-}
 
 // helpers
 
@@ -43,7 +37,7 @@ void shutdown_socket(int socket_fd)
 
 // Server implementation
 
-Server::Server(): connection_queue(10)
+Server::Server(): connection_queue(10), is_listening()
 {
     if ((socket_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
     {
@@ -82,20 +76,11 @@ void Server::start(unsigned port, unsigned queue_size)
     sockaddr connection_address = {};
     socklen_t connection_size = sizeof(connection_address);
 
-    int connection;
-
-    std::thread thread([this]() {
-            // should use setsockopt() to make connection socket reusable/still-alive
-            // then store open connections somewhere to be shutdown/closed when server is stopped
-            this->get_next_request();
-    });
-
+    int connection; // TODO:              socket_addr, addr_size --- to be stored somewhere?
     while ((connection = accept(socket_fd, nullptr, nullptr)) >= 0)
     {
-        // if connection_address / address_size are needed, will need to pass a struct to the connection queue
         connection_queue.push(connection);
     }
-    thread.join();
 
     std::cout << "Error on incoming connection ... [errno: " << errno << "]" << std::endl;
 }
@@ -106,27 +91,26 @@ void Server::stop()
     shutdown_socket(socket_fd);
 }
 
-// should pass parsed request as struct to mux
-char* Server::get_next_request()
+Server::Request Server::get_next_request()
 {
     int connection;
     if (!connection_queue.pop(&connection)) {
-        return nullptr;
+        return Request();
     }
 
-    char* buffer = new char[4096];
-    const int buffer_size = 4096 * sizeof(char);
+    const size_t buffer_len = 4096;
+    char* buffer = new char[buffer_len];
 
     const char *method, *path;
     int bytes_parsed, minor_version;
-    struct phr_header headers[100];
+    phr_header headers[100];
     size_t method_len, path_len, num_headers;
     
     unsigned long buffer_index = 0;
 
     while (1) {
         long bytes_read;
-        while ((bytes_read = read(connection, buffer + buffer_index, buffer_size - buffer_index)) == -1 && errno == EINTR);
+        while ((bytes_read = read(connection, buffer + buffer_index, buffer_len - buffer_index)) == -1 && errno == EINTR);
         if (bytes_read <= 0)
         {
             throw std::runtime_error("IOERROR");
@@ -155,22 +139,21 @@ char* Server::get_next_request()
         }
     }
 
-    printf("request is %d bytes long\n", bytes_parsed);
-    printf("method is %.*s\n", (int)method_len, method);
-    printf("path is %.*s\n", (int)path_len, path);
-    printf("HTTP version is 1.%d\n", minor_version);
-    printf("headers:\n");
-    for (int i = 0; i != num_headers; ++i) {
-        printf("%.*s: %.*s\n", (int)headers[i].name_len, headers[i].name,
-            (int)headers[i].value_len, headers[i].value);
+    return Request(method, method_len, path, path_len, headers, num_headers);
+}
+
+
+Server::Request::Request(const char* method, size_t method_len, const char* path, size_t path_len, phr_header* headers, size_t num_headers)
+    : method(method, method_len), path(path, path_len), is_valid(true)
+{
+    this->headers.reserve(num_headers);
+    if (headers) {
+        for (size_t i = 0; i < num_headers; i++) {
+            this->headers.emplace(this->headers.begin() + i,
+                Header{
+                    std::string(headers[i].name, headers[i].name_len),
+                    std::string(headers[i].value, headers[i].value_len)
+                });
+        }
     }
-
-    std::cout << buffer << std::endl;
-
-    const char* msg = "It's working.";
-
-    write(connection, msg, strlen(msg));
-    close(connection);
-
-    return buffer;
 }

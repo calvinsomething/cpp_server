@@ -1,12 +1,14 @@
 #include <iostream>
 #include <exception>
 
-#include "signal.h"
+#include <signal.h>
 
-#include "server.h"
+#include "Mux.h"
+#include "Server.h"
 
 const int PORT = 8080, REQUEST_QUEUE_SIZE = 10;
 
+// Create server -- make global/static so it can be stopped in sigint_handler
 static Server server;
 
 extern "C" {
@@ -19,11 +21,10 @@ extern "C" {
 
 int main()
 {
-    // should update to sigaction
+    // TODO: should update to sigaction
     signal(SIGINT, sigint_handler);
     try {
-        new(&server) Server;
-        std::cout << "Server created..." << std::endl;
+        Mux mux(server, 4);
 
         server.start(PORT, REQUEST_QUEUE_SIZE);
     } catch (std::exception err) {
