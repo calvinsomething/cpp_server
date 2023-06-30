@@ -1,13 +1,9 @@
 #pragma once
 
-#include <thread>
+#include <iostream>
 
-#include "Server.h"
-#include "Worker.h"
+#include "Request.h"
 
-class Mux {
-    Server& server;
-    std::vector<Worker> workers;
-public:
-    Mux(Server& server, size_t worker_count);
-};
+void mux(Request& request) {
+    std::cout << "MUX:::" << request.method << std::endl;
+}

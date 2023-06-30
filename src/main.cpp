@@ -5,8 +5,9 @@
 
 #include "Mux.h"
 #include "Server.h"
+#include "Worker.h"
 
-const int PORT = 8080, REQUEST_QUEUE_SIZE = 10;
+const int PORT = 8080, REQUEST_QUEUE_SIZE = 10, WORKER_COUNT = 4;
 
 // Create server -- make global/static so it can be stopped in sigint_handler
 static Server server;
@@ -21,10 +22,18 @@ extern "C" {
 
 int main()
 {
-    // TODO: should update to sigaction
-    signal(SIGINT, sigint_handler);
+    struct sigaction s{};
+    s.sa_handler = sigint_handler;
+    s.sa_flags = SA_RESETHAND;
+    sigaction(SIGINT, &s, nullptr);
+
     try {
-        Mux mux(server, 4);
+        std::vector<Worker> workers;
+        workers.reserve(WORKER_COUNT);
+        for (size_t i = 0; i < WORKER_COUNT; i++)
+        {
+            workers.emplace_back(&server, mux);
+        }
 
         server.start(PORT, REQUEST_QUEUE_SIZE);
     } catch (std::exception err) {

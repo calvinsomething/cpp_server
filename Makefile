@@ -1,27 +1,25 @@
-objects = obj/main.o obj/Server.o obj/Mux.o obj/Worker.o
-deps = vendor/picohttpparser/picohttpparser.o
+cc = g++
+include_dirs = vendor
+build_flags = -pthread
+create_deps = -MMD
+include_flags = $(foreach dir,$(include_dirs),-I$(dir))
 
-bin/server: $(objects) $(deps)
-	g++ -pthread $(objects) $(deps) -o bin/server
+src = $(wildcard src/*.cpp)
+objects = $(patsubst src/%.cpp,obj/%.o,$(src))
+deps = $(wildcard dep/*.d)
 
-obj/main.o: src/main.cpp
-	g++ -c src/main.cpp -o obj/main.o -I vendor
+include $(deps)
 
-obj/Server.o: src/Server.cpp src/AtomicQueue.h
-	g++ -c src/Server.cpp -o obj/Server.o -I vendor
+bin/server: $(objects) vendor/picohttpparser/picohttpparser.o
+	$(cc) $(build_flags) -o $@ $^
 
-obj/Mux.o: src/Mux.cpp src/Server.h src/Worker.h
-	g++ -c src/Mux.cpp -o obj/Mux.o -I vendor
+obj/%.o: src/%.cpp
+	$(cc) $(include_flags) $(create_deps) -o dep/$(*F) $^;\
+	$(cc) -c $(include_flags) -o $@ $^
 
-obj/Worker.o: src/Worker.cpp src/Server.h
-	g++ -c src/Worker.cpp -o obj/Worker.o -I vendor
-
-vendor/picohttpparser/picohttpparser.o: vendor/picohttpparser/picohttpparser.h vendor/picohttpparser/picohttpparser.c
-	g++ -c vendor/picohttpparser/picohttpparser.c -o vendor/picohttpparser/picohttpparser.o
+vendor/%.o: vendor/%.c
+	$(cc) -c -o $@ $^
 
 .PHONY: clean
 clean:
-	- rm $(objects) bin/server
-
-clean-deps:
-	- rm $$(find vendor -name *.o)
+	- rm $(objects) $(deps) bin/server
