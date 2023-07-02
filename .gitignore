@@ -8,7 +8,7 @@
 bin/*
 
 # deps
-#dep/*
+dep/*
 
 # edittor
 .vscode/*
