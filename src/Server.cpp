@@ -4,6 +4,7 @@
 #include <exception>
 #include <iostream>
 #include <sstream>
+#include <utility>
 
 #include <sys/socket.h>
 #include <string.h>
@@ -11,7 +12,7 @@
 #include <errno.h>
 #include <unistd.h>
 
-// helpers
+// Helpers
 
 std::runtime_error socket_setup_error(const char* action, int error_code)
 {
@@ -91,11 +92,11 @@ void Server::stop()
     shutdown_socket(socket_fd);
 }
 
-Request Server::get_next_request()
+bool Server::dispatch(Handler handler)
 {
     int connection;
     if (!connection_queue.pop(&connection)) {
-        return Request();
+        return false;
     }
 
     const size_t buffer_len = 4096;
@@ -139,5 +140,9 @@ Request Server::get_next_request()
         }
     }
 
-    return Request(method, method_len, path, path_len, headers, num_headers);
+    handler(
+        Request(connection, method, method_len, path, path_len, headers, num_headers),
+        ResponseWriter(connection)
+    );
+    return true;
 }

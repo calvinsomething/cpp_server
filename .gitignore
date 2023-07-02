@@ -7,6 +7,9 @@
 *.exe
 bin/*
 
+# deps
+#dep/*
+
 # edittor
 .vscode/*
 !.vscode/settings.json

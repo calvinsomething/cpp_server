@@ -3,13 +3,12 @@
 
 #include <signal.h>
 
-#include "Mux.h"
 #include "Server.h"
 #include "Worker.h"
 
 const int PORT = 8080, REQUEST_QUEUE_SIZE = 10, WORKER_COUNT = 4;
 
-// Create server -- make global/static so it can be stopped in sigint_handler
+// Create server -- make static so it can be stopped in sigint_handler
 static Server server;
 
 extern "C" {
@@ -32,7 +31,7 @@ int main()
         workers.reserve(WORKER_COUNT);
         for (size_t i = 0; i < WORKER_COUNT; i++)
         {
-            workers.emplace_back(&server, mux);
+            workers.emplace_back(&server);
         }
 
         server.start(PORT, REQUEST_QUEUE_SIZE);

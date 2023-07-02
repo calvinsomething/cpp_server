@@ -1,20 +1,24 @@
 cc = g++
 include_dirs = vendor
 build_flags = -pthread
-create_deps = -MMD
+create_deps = -M -MF dep/$(*F).d
 include_flags = $(foreach dir,$(include_dirs),-I$(dir))
 
+binary = bin/server
+
 src = $(wildcard src/*.cpp)
-objects = $(patsubst src/%.cpp,obj/%.o,$(src))
+vendor_c = $(wildcard vendor/*/*.c)
+
+objects = $(patsubst src/%.cpp,obj/%.o,$(src)) $(patsubst vendor/%.c,vendor/%.o,$(vendor_c))
 deps = $(wildcard dep/*.d)
 
 include $(deps)
 
-bin/server: $(objects) vendor/picohttpparser/picohttpparser.o
+$(binary): $(objects)
 	$(cc) $(build_flags) -o $@ $^
 
 obj/%.o: src/%.cpp
-	$(cc) $(include_flags) $(create_deps) -o dep/$(*F) $^;\
+	$(cc) -E $(include_flags) $(create_deps) $^ &&\
 	$(cc) -c $(include_flags) -o $@ $^
 
 vendor/%.o: vendor/%.c
@@ -22,4 +26,4 @@ vendor/%.o: vendor/%.c
 
 .PHONY: clean
 clean:
-	- rm $(objects) $(deps) bin/server
+	- rm $(wildcard obj/*.o) $(deps) $(binary)

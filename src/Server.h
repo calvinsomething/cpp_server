@@ -1,11 +1,10 @@
 #pragma once
 
-#include <vector>
-
-#include <picohttpparser/picohttpparser.h>
-
 #include "AtomicQueue.h"
 #include "Request.h"
+#include "ResponseWriter.h"
+
+typedef void (* Handler)(Request, ResponseWriter);
 
 class Server
 {
@@ -20,5 +19,5 @@ public:
     void start(unsigned port, unsigned queue_size);
     void stop();
     
-    Request get_next_request();
+    bool dispatch(Handler handler);
 };
