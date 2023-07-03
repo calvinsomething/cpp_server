@@ -8,11 +8,9 @@ binary = bin/server
 
 src = $(wildcard src/*.cpp)
 vendor_c = $(wildcard vendor/*/*.c)
+includes = $(wildcard dep/*.d)
 
 objects = $(patsubst src/%.cpp,obj/%.o,$(src)) $(patsubst vendor/%.c,vendor/%.o,$(vendor_c))
-deps = $(wildcard dep/*.d)
-
-include $(deps)
 
 $(binary): $(objects)
 	$(cc) $(build_flags) -o $@ $^
@@ -23,6 +21,8 @@ obj/%.o: src/%.cpp
 
 vendor/%.o: vendor/%.c
 	$(cc) -c -o $@ $^
+
+include $(includes) #include dependency files not working (no recipe, file path not correct)
 
 .PHONY: clean
 clean:

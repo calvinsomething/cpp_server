@@ -3,6 +3,7 @@
 
 #include <signal.h>
 
+#include "Mux.h"
 #include "Server.h"
 #include "Worker.h"
 

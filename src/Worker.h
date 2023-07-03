@@ -10,13 +10,15 @@ public:
     Worker(Worker&& other) = default;
 
     Worker(Server* server)
-        : std::thread([server]()
-        {
-                while (server->dispatch(mux)) // when dispatch returns false, connections have been closed
-                {
-                    std::cout << "Handled request....." << std::endl;
-                }
-        })
+        : std::thread(
+            [server]()
+            {
+                    while (server->dispatch(mux)) // when dispatch returns false, connections have been closed
+                    {
+                        std::cout << "Handled request....." << std::endl;
+                    }
+            }
+        )
     {
     }
 
