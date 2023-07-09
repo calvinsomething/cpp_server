@@ -7,7 +7,8 @@ template <typename T, uint hard_size_limit>
 class AtomicQueue {
     // Both queue and i are critical data
     T* queue;
-    size_t i, len; // TODO: ADD A SEPERATE INDEX FOR PUSHING AND POPPING SO IT'S A QUEUE, NOT A STACK!
+    unsigned i, j, len;
+    bool wrap;
 
     std::mutex mtx;
     std::condition_variable pop_condition;
@@ -15,29 +16,33 @@ class AtomicQueue {
 
     bool stopped;
 public:
-    AtomicQueue(unsigned len): i(), len(len), stopped(false) {
+    AtomicQueue(unsigned len): i(), j(), len(len), wrap(), stopped() {
         if (len > hard_size_limit) len = hard_size_limit;
         queue = static_cast<T*>(alloca(len * sizeof(T)));
     }
     
     void push(T val) {
         std::unique_lock lock(mtx);
-        while (i == len) {
+        while (wrap && i == j) {
             push_condition.wait(lock);
             if (stopped) return;
         }
-        queue[i++] = val;
+        queue[i] = val;
+        i = (i + 1) % len;
+        wrap = !i;
         pop_condition.notify_one();
         return;
     }
 
     bool pop(T* output) {
         std::unique_lock lock(mtx);
-        while (!i) {
+        while (!wrap && j == i) {
             pop_condition.wait(lock);
             if (stopped) return false;
         }
-        *output = queue[--i];
+        *output = queue[j];
+        j = (j + 1) % len;
+        wrap = wrap && j;
         push_condition.notify_one();
         return true;
     }

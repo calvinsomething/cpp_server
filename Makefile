@@ -1,12 +1,13 @@
 cc = g++
 include_dirs = vendor
 build_flags = -pthread
-create_deps = -M -MF dep/$(*F).d
+create_deps = -MM -MF dep/$(*F).d -MQ $@
 include_flags = $(foreach dir,$(include_dirs),-I$(dir))
 
 binary = bin/server
 
 src = $(wildcard src/*.cpp)
+deps = $(wildcard dep/*.d)
 vendor_c = $(wildcard vendor/*/*.c)
 includes = $(wildcard dep/*.d)
 
@@ -22,7 +23,7 @@ obj/%.o: src/%.cpp
 vendor/%.o: vendor/%.c
 	$(cc) -c -o $@ $^
 
-include $(includes) #include dependency files not working (no recipe, file path not correct)
+include $(includes) # not working... dependency list from .d files get used in obj/%.o rule (caused by repeated target??)
 
 .PHONY: clean
 clean:
