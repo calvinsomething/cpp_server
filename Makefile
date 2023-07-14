@@ -11,20 +11,20 @@ deps = $(wildcard dep/*.d)
 vendor_c = $(wildcard vendor/*/*.c)
 includes = $(wildcard dep/*.d)
 
-objects = $(patsubst src/%.cpp,obj/%.o,$(src)) $(patsubst vendor/%.c,vendor/%.o,$(vendor_c))
+objects = $(src:src/%.cpp=obj/%.o) $(vendor_c:.c=.o)
 
 $(binary): $(objects)
 	$(cc) $(build_flags) -o $@ $^
 
 obj/%.o: src/%.cpp
-	$(cc) -E $(include_flags) $(create_deps) $^ &&\
-	$(cc) -c $(include_flags) -o $@ $^
+	$(cc) -E $(include_flags) $(create_deps) $< &&\
+	$(cc) -c $(include_flags) -o $@ $<
 
 vendor/%.o: vendor/%.c
 	$(cc) -c -o $@ $^
 
-include $(includes) # not working... dependency list from .d files get used in obj/%.o rule (caused by repeated target??)
-
 .PHONY: clean
 clean:
 	- rm $(wildcard obj/*.o) $(deps) $(binary)
+
+include $(includes)
