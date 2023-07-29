@@ -10,4 +10,5 @@ class ResponseWriter
 public:
     ResponseWriter(int fd): fd(fd) {}
     void write_text(std::string text);
+    void write_file(std::string file_path);
 };

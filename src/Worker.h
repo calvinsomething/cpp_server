@@ -2,10 +2,11 @@
 
 #include <thread>
 
-#include "Mux.h"
+#include "mux.h"
 #include "Server.h"
 
-class Worker : public std::thread {
+class Worker : public std::thread
+{
 public:
     Worker(Worker&& other) = default;
 

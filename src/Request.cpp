@@ -1,7 +1,7 @@
 #include "Request.h"
 
 
-Request::Request(int fd, const char* method, size_t method_len, const char* path, size_t path_len, phr_header* headers, size_t num_headers)
+Request::Request(const int fd, const char* method, size_t method_len, const char* path, size_t path_len, phr_header* headers, size_t num_headers)
     : fd(fd), method(method, method_len), path(path, path_len)
 {
     this->headers.reserve(num_headers);

@@ -4,12 +4,14 @@
 #include <exception>
 #include <iostream>
 #include <sstream>
+#include <thread>
 #include <utility>
 
-#include <sys/socket.h>
-#include <string.h>
-#include <netinet/in.h>
 #include <errno.h>
+#include <sys/epoll.h>
+#include <netinet/in.h>
+#include <string.h>
+#include <sys/socket.h>
 #include <unistd.h>
 
 // Helpers
@@ -21,34 +23,30 @@ std::runtime_error socket_setup_error(const char* action, int error_code)
     return std::runtime_error(ss.str());
 }
 
-void shutdown_socket(int socket_fd)
+bool ci_str_equal(const char* a, const char* b, const unsigned n)
 {
-    if (shutdown(socket_fd, SHUT_RDWR)) {
-        int err = errno;
-        switch (err) {
-        case EBADF:
-            std::cout << "'" << socket_fd << "' is not a valid file descriptor." << std::endl;
-        case ENOTSOCK:
-            std::cout << "fd[" << socket_fd << "] is not a socket." << std::endl;
-        case ENOTCONN:
-            std::cout << "Socket (fd[" << socket_fd << "]) is not connected." << std::endl;
+    for (int i = 0; i < n; i++)
+    {
+        if (*a != *b && *a + 32 != *b && *a - 32 != *b) {
+            return false;
         }
     }
+    return true;
 }
 
 // Server implementation
 
 Server::Server(): connection_queue(10), is_listening()
 {
-    if ((socket_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+    if ((listening_socket = socket(AF_INET, SOCK_STREAM, 0)) < 0)
     {
-        throw socket_setup_error("create", socket_fd);
+        throw socket_setup_error("create", listening_socket);
     }
 }
 
 Server::~Server()
 {
-    close(socket_fd);
+    close(listening_socket);
 }
 
 void Server::start(unsigned port, unsigned queue_size)
@@ -61,41 +59,65 @@ void Server::start(unsigned port, unsigned queue_size)
     address.sin_addr.s_addr = htonl(INADDR_ANY);
 
     int result;
-    if ((result = bind(socket_fd, reinterpret_cast<sockaddr*>(&address), sizeof(address))) < 0)
+    if ((result = bind(listening_socket, reinterpret_cast<sockaddr*>(&address), sizeof(address))) < 0)
     {
         throw socket_setup_error("bind", result);
     }
 
-    if ((result = listen(socket_fd, queue_size)) < 0)
+    if ((result = listen(listening_socket, queue_size)) < 0)
     {
         throw socket_setup_error("listen on", result);
     }
 
     std::cout << "Server listening on port " << port << "..." << std::endl;
 
-    // Prepare for incoming connections
-    sockaddr connection_address = {};
-    socklen_t connection_size = sizeof(connection_address);
+    epoll = epoll_create1(0);
 
-    int connection; // TODO:              socket_addr, addr_size --- to be stored somewhere?
-    while ((connection = accept(socket_fd, nullptr, nullptr)) >= 0)
+    epoll_event input_event;
+    input_event.events = EPOLLIN;
+    input_event.data.fd = listening_socket;
+
+    if (epoll_ctl(epoll, EPOLL_CTL_ADD, listening_socket, &input_event))
     {
-        connection_queue.push(connection);
+        throw std::runtime_error("Error registering polling socket.");
     }
 
-    std::cout << "Error on incoming connection ... [errno: " << errno << "]" << std::endl;
+    int n;
+    epoll_event connection_event;
+    while (n = epoll_wait(epoll, &connection_event, 1, -1))
+    {
+        if (n == -1) {
+            perror("epoll_wait");
+            break;
+        }
+        int connection;
+        if (connection_event.data.fd == listening_socket) {
+            if ((connection = accept(listening_socket, nullptr, nullptr)) < 0)
+            {
+                perror("accepting connection");
+                break;
+            }
+        } else {
+            connection = connection_event.data.fd;
+        }
+        connection_queue.push(connection);
+    }
 }
 
 void Server::stop()
 {
     connection_queue.stop();
-    shutdown_socket(socket_fd);
+    if (shutdown(listening_socket, SHUT_RDWR))
+    {
+        perror("shutting down listening socket");
+    }
 }
 
 bool Server::dispatch(Handler handler)
 {
     int connection;
-    if (!connection_queue.pop(&connection)) {
+    if (!connection_queue.pop(&connection))
+    {
         return false;
     }
 
@@ -109,7 +131,8 @@ bool Server::dispatch(Handler handler)
     
     unsigned long buffer_index = 0;
 
-    while (1) {
+    while (1)
+    {
         long bytes_read;
         while ((bytes_read = read(connection, buffer + buffer_index, buffer_len - buffer_index)) == -1 && errno == EINTR);
         if (bytes_read <= 0)
@@ -140,9 +163,35 @@ bool Server::dispatch(Handler handler)
         }
     }
 
+    for (int i = 0; i < num_headers; i++)
+    {
+        if (headers[i].name_len == 10 && ci_str_equal(headers[i].name, "Connection", 10))
+        {
+            if (headers[i].value_len == 10 && ci_str_equal(headers[i].value, "Keep-Alive", 10))
+            {
+                keep_alive(connection);
+            }
+            break;
+        }
+    }
+
     handler(
         Request(connection, method, method_len, path, path_len, headers, num_headers),
         ResponseWriter(connection)
     );
     return true;
+}
+
+void Server::keep_alive(int connection)
+{
+    epoll_event input_event;
+    input_event.events = EPOLLIN;
+    input_event.data.fd = connection;
+
+    // move to ConnectionManager -- only add to epoll if connection not already managed
+    if (epoll_ctl(epoll, EPOLL_CTL_ADD, connection, &input_event))
+    {
+        perror("error adding keep-alive connection to epoll");
+    }
+    // register connection with ConnectionManager -- manage keep-alive timeout/max
 }
