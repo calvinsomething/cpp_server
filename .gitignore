@@ -13,3 +13,4 @@ dep/*
 # edittor
 .vscode/*
 !.vscode/settings.json
+.clangd

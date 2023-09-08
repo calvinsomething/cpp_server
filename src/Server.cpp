@@ -14,6 +14,10 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include "utils.h"
+
+const int MAX_REQUESTS = 100, TIMEOUT = 5;
+
 // Helpers
 
 std::runtime_error socket_setup_error(const char* action, int error_code)
@@ -23,22 +27,11 @@ std::runtime_error socket_setup_error(const char* action, int error_code)
     return std::runtime_error(ss.str());
 }
 
-bool ci_str_equal(const char* a, const char* b, const unsigned n)
-{
-    for (int i = 0; i < n; i++)
-    {
-        if (*a != *b && *a + 32 != *b && *a - 32 != *b) {
-            return false;
-        }
-    }
-    return true;
-}
-
 // Server implementation
 
 Server::Server(): connection_queue(10), is_listening()
 {
-    if ((listening_socket = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+    if ((listening_socket = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0)) < 0)
     {
         throw socket_setup_error("create", listening_socket);
     }
@@ -47,6 +40,26 @@ Server::Server(): connection_queue(10), is_listening()
 Server::~Server()
 {
     close(listening_socket);
+}
+
+void Server::add_to_epoll(int fd)
+{
+    epoll_event input_event;
+    input_event.events = EPOLLIN;
+    input_event.data.fd = fd;
+
+    if (epoll_ctl(epoll, EPOLL_CTL_ADD, fd, &input_event))
+    {
+        throw std::runtime_error("Error registering polling socket.");
+    }
+}
+
+void Server::remove_from_epoll(int fd)
+{
+    if (epoll_ctl(epoll, EPOLL_CTL_DEL, fd, 0))
+    {
+        throw std::runtime_error("Error removing expired connection from epoll list.");
+    }
 }
 
 void Server::start(unsigned port, unsigned queue_size)
@@ -72,35 +85,27 @@ void Server::start(unsigned port, unsigned queue_size)
     std::cout << "Server listening on port " << port << "..." << std::endl;
 
     epoll = epoll_create1(0);
-
-    epoll_event input_event;
-    input_event.events = EPOLLIN;
-    input_event.data.fd = listening_socket;
-
-    if (epoll_ctl(epoll, EPOLL_CTL_ADD, listening_socket, &input_event))
-    {
-        throw std::runtime_error("Error registering polling socket.");
-    }
+    add_to_epoll(listening_socket);
 
     int n;
     epoll_event connection_event;
-    while (n = epoll_wait(epoll, &connection_event, 1, -1))
+    while ((n = epoll_wait(epoll, &connection_event, 1, -1)))
     {
         if (n == -1) {
-            perror("epoll_wait");
+            perror("error returned from epoll_wait");
             break;
         }
-        int connection;
+        int conn_fd;
         if (connection_event.data.fd == listening_socket) {
-            if ((connection = accept(listening_socket, nullptr, nullptr)) < 0)
+            if ((conn_fd = accept(listening_socket, nullptr, nullptr)) < 0)
             {
-                perror("accepting connection");
+                perror("error accepting conn_fd");
                 break;
             }
         } else {
-            connection = connection_event.data.fd;
+            conn_fd = connection_event.data.fd;
         }
-        connection_queue.push(connection);
+        connection_queue.push(conn_fd);
     }
 }
 
@@ -109,7 +114,7 @@ void Server::stop()
     connection_queue.stop();
     if (shutdown(listening_socket, SHUT_RDWR))
     {
-        perror("shutting down listening socket");
+        perror("error shutting down listening socket");
     }
 }
 
@@ -119,6 +124,31 @@ bool Server::dispatch(Handler handler)
     if (!connection_queue.pop(&connection))
     {
         return false;
+    }
+    std::chrono::steady_clock::time_point timestamp = std::chrono::steady_clock::now();
+
+    ResponseWriter response_writer(connection);
+
+    auto connection_history = open_connections.find(connection);
+    bool is_open = false;
+
+    if (connection_history != open_connections.end())
+    {
+        if (
+            // time expired
+            std::chrono::duration_cast<std::chrono::milliseconds>(timestamp - connection_history->second.created_at) > std::chrono::seconds(TIMEOUT)
+            // max requests exceeded
+            || connection_history->second.request_count == MAX_REQUESTS
+        )
+        {
+            response_writer.set_keep_alive(false);
+            remove_from_epoll(connection);
+        }
+        else
+        {
+            connection_history->second.request_count++;
+        }
+        is_open = true;
     }
 
     const size_t buffer_len = 4096;
@@ -165,33 +195,26 @@ bool Server::dispatch(Handler handler)
 
     for (int i = 0; i < num_headers; i++)
     {
-        if (headers[i].name_len == 10 && ci_str_equal(headers[i].name, "Connection", 10))
+        if (headers[i].name_len == 10 && ci_str_equal(headers[i].name, "connection", 10))
         {
-            if (headers[i].value_len == 10 && ci_str_equal(headers[i].value, "Keep-Alive", 10))
+            if (headers[i].value_len == 10 && ci_str_equal(headers[i].value, "close", 5))
             {
-                keep_alive(connection);
+                // can read request, but should not respond
+                response_writer.close();
             }
             break;
         }
     }
 
+    if (!is_open)
+    {
+        add_to_epoll(connection);
+        open_connections[connection] = {timestamp, 1};
+    }
+
     handler(
         Request(connection, method, method_len, path, path_len, headers, num_headers),
-        ResponseWriter(connection)
+        response_writer
     );
     return true;
-}
-
-void Server::keep_alive(int connection)
-{
-    epoll_event input_event;
-    input_event.events = EPOLLIN;
-    input_event.data.fd = connection;
-
-    // move to ConnectionManager -- only add to epoll if connection not already managed
-    if (epoll_ctl(epoll, EPOLL_CTL_ADD, connection, &input_event))
-    {
-        perror("error adding keep-alive connection to epoll");
-    }
-    // register connection with ConnectionManager -- manage keep-alive timeout/max
 }
