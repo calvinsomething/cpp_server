@@ -50,7 +50,8 @@ void Server::add_to_epoll(int fd)
 
     if (epoll_ctl(epoll, EPOLL_CTL_ADD, fd, &input_event))
     {
-        throw std::runtime_error("Error registering polling socket.");
+        perror("Error registering polling socket:");
+        exit(EXIT_FAILURE);
     }
 }
 
@@ -58,7 +59,8 @@ void Server::remove_from_epoll(int fd)
 {
     if (epoll_ctl(epoll, EPOLL_CTL_DEL, fd, 0))
     {
-        throw std::runtime_error("Error removing expired connection from epoll list.");
+        perror("Error removing expired connection from epoll list:");
+        exit(EXIT_FAILURE);
     }
 }
 
@@ -109,12 +111,16 @@ void Server::start(unsigned port, unsigned queue_size)
     }
 }
 
-void Server::stop()
+void Server::stop(std::exception_ptr exception)
 {
     connection_queue.stop();
     if (shutdown(listening_socket, SHUT_RDWR))
     {
         perror("error shutting down listening socket");
+    }
+    if (exception)
+    {
+        std::rethrow_exception(exception);
     }
 }
 
@@ -143,6 +149,7 @@ bool Server::dispatch(Handler handler)
         {
             response_writer.set_keep_alive(false);
             remove_from_epoll(connection);
+            open_connections.erase(connection);
         }
         else
         {

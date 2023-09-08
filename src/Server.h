@@ -27,7 +27,7 @@ public:
     ~Server();
 
     void start(unsigned port, unsigned queue_size);
-    void stop();
+    void stop(std::exception_ptr exception = nullptr);
     bool dispatch(Handler handler);
     void add_to_epoll(int connection);
     void remove_from_epoll(int fd);

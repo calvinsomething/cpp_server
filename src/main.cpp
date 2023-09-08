@@ -13,7 +13,8 @@ const int PORT = 8080, REQUEST_QUEUE_SIZE = 10, WORKER_COUNT = 4;
 // Create server -- make static so it can be stopped in sigint_handler
 static Server server;
 
-extern "C" {
+extern "C"
+{
     void sigint_handler(int signal)
     {
         server.stop();
@@ -28,7 +29,8 @@ int main()
     s.sa_flags = SA_RESETHAND;
     sigaction(SIGINT, &s, nullptr);
 
-    try {
+    try
+    {
         std::vector<Worker> workers;
         workers.reserve(WORKER_COUNT);
         for (size_t i = 0; i < WORKER_COUNT; i++)
@@ -37,9 +39,13 @@ int main()
         }
 
         server.start(PORT, REQUEST_QUEUE_SIZE);
-    } catch (std::exception err) {
-        std::cout << err.what() << std::endl;
-    } catch (...) {
+    }
+    catch (std::exception &err)
+    {
+        std::cout << "Caught exception:\n" << err.what() << std::endl;
+    }
+    catch (...)
+    {
         std::cout << "Unknown error." << std::endl;
     }
 }

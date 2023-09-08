@@ -1,5 +1,7 @@
 #pragma once
 
+#include <exception>
+#include <iostream>
 #include <thread>
 
 #include "mux.h"
@@ -14,10 +16,17 @@ public:
         : std::thread(
             [server]()
             {
+                try
+                {
                     while (server->dispatch(mux)) // when dispatch returns false, connections have been closed
                     {
                         std::cout << "Handled request....." << std::endl;
                     }
+                }
+                catch (...)
+                {
+                    server->stop(std::current_exception());
+                }
             }
         )
     {
