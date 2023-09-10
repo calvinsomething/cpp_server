@@ -35,6 +35,11 @@ Server::Server(): connection_queue(10), is_listening()
     {
         throw socket_setup_error("create", listening_socket);
     }
+    const int enable = 1;
+    if (setsockopt(listening_socket, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int)) < 0)
+    {
+        perror("error setting listening socket option (SO_REUSEADDR)");
+    }
 }
 
 Server::~Server()
@@ -42,16 +47,15 @@ Server::~Server()
     close(listening_socket);
 }
 
-void Server::add_to_epoll(int fd)
+void Server::update_epoll_list(int fd, int operation, int flags)
 {
     epoll_event input_event;
-    input_event.events = EPOLLIN;
+    input_event.events = flags;
     input_event.data.fd = fd;
 
-    if (epoll_ctl(epoll, EPOLL_CTL_ADD, fd, &input_event))
+    if (epoll_ctl(epoll, operation, fd, &input_event))
     {
-        perror("Error registering polling socket:");
-        exit(EXIT_FAILURE);
+        perror("error registering polling socket");
     }
 }
 
@@ -59,8 +63,7 @@ void Server::remove_from_epoll(int fd)
 {
     if (epoll_ctl(epoll, EPOLL_CTL_DEL, fd, 0))
     {
-        perror("Error removing expired connection from epoll list:");
-        exit(EXIT_FAILURE);
+        perror("error removing expired connection from epoll list");
     }
 }
 
@@ -87,7 +90,7 @@ void Server::start(unsigned port, unsigned queue_size)
     std::cout << "Server listening on port " << port << "..." << std::endl;
 
     epoll = epoll_create1(0);
-    add_to_epoll(listening_socket);
+    update_epoll_list(listening_socket, EPOLL_CTL_ADD, EPOLLIN);
 
     int n;
     epoll_event connection_event;
@@ -101,7 +104,7 @@ void Server::start(unsigned port, unsigned queue_size)
         if (connection_event.data.fd == listening_socket) {
             if ((conn_fd = accept(listening_socket, nullptr, nullptr)) < 0)
             {
-                perror("error accepting conn_fd");
+                perror("error accepting connection");
                 break;
             }
         } else {
@@ -114,14 +117,19 @@ void Server::start(unsigned port, unsigned queue_size)
 void Server::stop(std::exception_ptr exception)
 {
     connection_queue.stop();
-    if (shutdown(listening_socket, SHUT_RDWR))
-    {
-        perror("error shutting down listening socket");
-    }
+    shutdown(listening_socket, SHUT_RDWR);
+    close(listening_socket);
+    close(epoll);
     if (exception)
     {
         std::rethrow_exception(exception);
     }
+}
+
+void Server::unwatch(int connection)
+{
+    remove_from_epoll(connection);
+    open_connections.erase(connection);
 }
 
 bool Server::dispatch(Handler handler)
@@ -136,7 +144,7 @@ bool Server::dispatch(Handler handler)
     ResponseWriter response_writer(connection);
 
     auto connection_history = open_connections.find(connection);
-    bool is_open = false;
+    bool is_open_connection = false;
 
     if (connection_history != open_connections.end())
     {
@@ -147,15 +155,14 @@ bool Server::dispatch(Handler handler)
             || connection_history->second.request_count == MAX_REQUESTS
         )
         {
-            response_writer.set_keep_alive(false);
-            remove_from_epoll(connection);
-            open_connections.erase(connection);
+            response_writer.keep_alive = false;
+            this->unwatch(connection);
         }
         else
         {
             connection_history->second.request_count++;
         }
-        is_open = true;
+        is_open_connection = true;
     }
 
     const size_t buffer_len = 4096;
@@ -171,10 +178,15 @@ bool Server::dispatch(Handler handler)
     while (1)
     {
         long bytes_read;
+
+        // TODO: handle multiple requests if it's possible they are waiting on this socket
         while ((bytes_read = read(connection, buffer + buffer_index, buffer_len - buffer_index)) == -1 && errno == EINTR);
         if (bytes_read <= 0)
         {
-            throw std::runtime_error("IOERROR");
+            this->unwatch(connection);
+            shutdown(connection, SHUT_RDWR);
+            close(connection);
+            return true;
         }
 
         auto prev_index = buffer_index;
@@ -213,10 +225,14 @@ bool Server::dispatch(Handler handler)
         }
     }
 
-    if (!is_open)
+    if (!is_open_connection)
     {
-        add_to_epoll(connection);
+        update_epoll_list(connection, EPOLL_CTL_ADD, EPOLLIN | EPOLLONESHOT);
         open_connections[connection] = {timestamp, 1};
+    }
+    else if (response_writer.keep_alive)
+    {
+        update_epoll_list(connection, EPOLL_CTL_MOD, EPOLLIN | EPOLLONESHOT);
     }
 
     handler(

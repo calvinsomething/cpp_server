@@ -16,6 +16,7 @@ struct History
 
 class Server
 {
+    // TODO: update to atomic map
     std::unordered_map<int, History> open_connections;
 
     int listening_socket, epoll;
@@ -28,7 +29,8 @@ public:
 
     void start(unsigned port, unsigned queue_size);
     void stop(std::exception_ptr exception = nullptr);
+    void unwatch(int connection);
     bool dispatch(Handler handler);
-    void add_to_epoll(int connection);
+    void update_epoll_list(int connection, int operation, int flags);
     void remove_from_epoll(int fd);
 };

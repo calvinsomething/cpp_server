@@ -2,10 +2,12 @@
 
 #include <exception>
 #include <iostream>
+#include <sstream>
 #include <thread>
 
 #include "mux.h"
 #include "Server.h"
+#include "utils.h"
 
 class Worker : public std::thread
 {
@@ -26,7 +28,11 @@ public:
                 catch (...)
                 {
                     server->stop(std::current_exception());
+                    return;
                 }
+                std::stringstream ss;
+                ss << "Thread " << std::this_thread::get_id() << " exitted gracefully." << std::endl;
+                std::cout << ss.str() << std::endl;
             }
         )
     {

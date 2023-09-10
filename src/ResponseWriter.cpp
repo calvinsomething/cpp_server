@@ -35,11 +35,7 @@ void ResponseWriter::send_file(unsigned status, std::string file_path)
 {
     send_headers(status, MSG_MORE);
     // TODO
-}
-
-void ResponseWriter::set_keep_alive(bool value)
-{
-    keep_alive = value;
+    // use sendfile()
 }
 
 void ResponseWriter::close()

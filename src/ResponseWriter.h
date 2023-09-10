@@ -22,7 +22,7 @@ public:
     void set_header(std::string name, std::string value);
     void remove_header(std::string name);
 
-    void set_keep_alive(bool value);
-
     void close();
+
+    friend class Server;
 };
