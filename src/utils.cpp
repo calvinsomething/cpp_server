@@ -1,6 +1,5 @@
+#include "pch.h"
 #include "utils.h"
-
-#include <ctype.h>
 
 bool ci_str_equal(const char* a, const char* b, const unsigned n)
 {

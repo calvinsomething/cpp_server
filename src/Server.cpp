@@ -1,18 +1,5 @@
+#include "pch.h"
 #include "Server.h"
-
-#include <cassert>
-#include <exception>
-#include <iostream>
-#include <sstream>
-#include <thread>
-#include <utility>
-
-#include <errno.h>
-#include <sys/epoll.h>
-#include <netinet/in.h>
-#include <string.h>
-#include <sys/socket.h>
-#include <unistd.h>
 
 #include "utils.h"
 
@@ -179,7 +166,6 @@ bool Server::dispatch(Handler handler)
     {
         long bytes_read;
 
-        // TODO: handle multiple requests if it's possible they are waiting on this socket
         while ((bytes_read = read(connection, buffer + buffer_index, buffer_len - buffer_index)) == -1 && errno == EINTR);
         if (bytes_read <= 0)
         {
